@@ -1,0 +1,988 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Stingem Lumina — Light Pole Audit Map</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+  :root {
+    --bg: #0e1322;
+    --panel: #151b2e;
+    --panel2: #1b2340;
+    --border: #2a3352;
+    --text: #e8ecf5;
+    --muted: #9aa5c0;
+    --accent: #f5b942;
+    --good: #22c55e;
+    --fair: #f59e0b;
+    --bad: #ef4444;
+    --inc: #94a3b8;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+    padding: 10px 16px;
+    background: linear-gradient(180deg, #141a30, #0e1322);
+    border-bottom: 1px solid var(--border);
+  }
+  header h1 { font-size: 1.05rem; margin: 0; letter-spacing: 0.3px; }
+  header h1 .star { color: var(--accent); }
+  header .sub { font-size: 0.75rem; color: var(--muted); }
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; margin-left: auto; }
+  .chip {
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 4px 12px;
+    font-size: 0.78rem;
+    display: flex; align-items: center; gap: 6px;
+    white-space: nowrap;
+  }
+  .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  .dot.good { background: var(--good); }
+  .dot.fair { background: var(--fair); }
+  .dot.bad { background: var(--bad); }
+  .dot.inc { background: var(--inc); }
+
+  #layout { display: flex; flex: 1; min-height: 0; }
+
+  #mapwrap { flex: 1; position: relative; min-width: 0; background: #1c2233; }
+  #map { position: absolute; inset: 0; }
+  #fallback { position: absolute; inset: 0; display: none; }
+  #fallback svg { width: 100%; height: 100%; display: block; cursor: crosshair; }
+  .mapbtns { position: absolute; top: 10px; right: 10px; z-index: 1000; display: flex; flex-direction: column; gap: 8px; }
+  .mbtn {
+    background: #fff; color: #111; border: none; border-radius: 8px;
+    padding: 8px 10px; font-size: 0.8rem; font-weight: 600; cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.35); width: 44px; text-align: center;
+  }
+  .mbtn:active { transform: translateY(1px); }
+  #legend {
+    position: absolute; left: 10px; bottom: 10px; z-index: 1000;
+    background: rgba(14, 19, 34, 0.88); border: 1px solid var(--border);
+    border-radius: 10px; padding: 8px 12px; font-size: 0.72rem; color: var(--muted);
+  }
+  #legend div { display: flex; align-items: center; gap: 7px; margin: 3px 0; }
+  #hint {
+    position: absolute; left: 50%; top: 12px; transform: translateX(-50%);
+    z-index: 1000; background: rgba(14,19,34,0.9); border: 1px solid var(--border);
+    color: var(--text); font-size: 0.78rem; padding: 7px 14px; border-radius: 999px;
+    pointer-events: none; white-space: nowrap; max-width: 92%; overflow: hidden; text-overflow: ellipsis;
+  }
+
+  aside#panel {
+    width: 340px; flex-shrink: 0; overflow-y: auto; padding: 14px;
+    background: var(--panel); border-left: 1px solid var(--border);
+  }
+  aside#panel h3 {
+    font-size: 0.72rem; text-transform: uppercase; letter-spacing: 1px;
+    color: var(--muted); margin: 18px 0 8px;
+  }
+  aside#panel h3:first-child { margin-top: 2px; }
+
+  .statgrid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .stat {
+    background: var(--panel2); border: 1px solid var(--border); border-radius: 10px;
+    padding: 8px 10px;
+  }
+  .stat .num { font-size: 1.25rem; font-weight: 700; }
+  .stat .lbl { font-size: 0.68rem; color: var(--muted); }
+
+  .dist { margin-top: 6px; }
+  .dist .row { display: flex; align-items: center; gap: 8px; margin: 5px 0; font-size: 0.72rem; }
+  .dist .row .name { width: 118px; color: var(--muted); flex-shrink: 0; }
+  .dist .row .bar { flex: 1; height: 9px; background: #232c4d; border-radius: 5px; overflow: hidden; }
+  .dist .row .bar i { display: block; height: 100%; border-radius: 5px; }
+  .dist .row .val { width: 46px; text-align: right; color: var(--text); flex-shrink: 0; }
+
+  .btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  button.btn {
+    background: var(--panel2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 9px; padding: 9px 8px; font-size: 0.78rem; cursor: pointer; font-weight: 600;
+  }
+  button.btn:hover { border-color: #3d4a78; background: #202a4e; }
+  button.btn.primary { background: var(--accent); color: #241a02; border-color: var(--accent); }
+  button.btn.primary:hover { background: #ffc95c; }
+  button.btn.danger-armed { background: #7f1d1d; border-color: var(--bad); color: #fff; }
+  button.btn.wide { grid-column: 1 / -1; }
+  #status { font-size: 0.72rem; color: var(--muted); margin-top: 8px; min-height: 1em; }
+
+  details.method { background: var(--panel2); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; font-size: 0.78rem; color: var(--muted); }
+  details.method summary { cursor: pointer; color: var(--text); font-weight: 600; font-size: 0.8rem; }
+  details.method ul { padding-left: 18px; margin: 8px 0 4px; }
+  details.method li { margin: 4px 0; }
+  details.method b { color: var(--text); }
+
+  dialog {
+    border: 1px solid var(--border); border-radius: 14px; background: var(--panel);
+    color: var(--text); padding: 0; width: min(520px, 94vw); max-height: 92vh;
+  }
+  dialog::backdrop { background: rgba(5, 8, 18, 0.7); }
+  .dlg-body { padding: 16px 18px; overflow-y: auto; max-height: 86vh; }
+  .dlg-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+  .dlg-head h2 { margin: 0; font-size: 1rem; }
+  #ratingBadge {
+    font-size: 0.7rem; font-weight: 700; padding: 3px 10px; border-radius: 999px;
+    background: #333; text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .q { margin: 12px 0; }
+  .q label { display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 5px; }
+  .q .help { font-size: 0.68rem; color: var(--muted); font-weight: 400; margin-top: 3px; }
+  .q select, .q input[type=text], .q input[type=number], .q textarea {
+    width: 100%; background: var(--panel2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 8px; padding: 8px 9px; font-size: 0.82rem;
+  }
+  .q textarea { resize: vertical; min-height: 54px; }
+  .q .pair { display: flex; gap: 8px; }
+  .q .pair > div { flex: 1; }
+  .q .seg { display: flex; gap: 6px; flex-wrap: wrap; }
+  .q .seg label {
+    display: inline-flex; align-items: center; gap: 5px;
+    background: var(--panel2); border: 1px solid var(--border);
+    padding: 6px 10px; border-radius: 999px; cursor: pointer; font-size: 0.72rem; font-weight: 500;
+  }
+  .q .seg input { accent-color: var(--accent); margin: 0; }
+  .q .seg label.on { border-color: var(--accent); background: #2a2a17; }
+  .dlg-foot { display: flex; gap: 8px; margin-top: 16px; }
+  .dlg-foot .btn { flex: 1; }
+  .coords { font-size: 0.68rem; color: var(--muted); }
+
+  #toast {
+    position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%);
+    background: #1f2937; color: #fff; border: 1px solid #4b5563;
+    padding: 9px 16px; border-radius: 999px; font-size: 0.78rem; z-index: 9999;
+    opacity: 0; pointer-events: none; transition: opacity 0.25s; max-width: 90vw; text-align: center;
+  }
+  #toast.show { opacity: 1; }
+
+  @media (max-width: 820px) {
+    #layout { flex-direction: column; }
+    #mapwrap { height: 55vh; flex: none; }
+    aside#panel { width: 100%; border-left: none; border-top: 1px solid var(--border); }
+    .chips { margin-left: 0; }
+  }
+  .leaflet-container { background: #1c2233; }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1><span class="star">⭐</span> Stingem Lumina · Light Pole Audit</h1>
+    <div class="sub">Izvor Park, Bucharest · methodology: Butterfly Conservation / IDA dark-sky audit</div>
+  </div>
+  <div class="chips" id="chips"></div>
+</header>
+
+<div id="layout">
+  <div id="mapwrap">
+    <div id="map"></div>
+    <div id="fallback"></div>
+    <div id="hint">Tap the map to place a light pole · tap a pole to edit it · switch base maps top-left</div>
+    <div class="mapbtns">
+      <button class="mbtn" id="btnGps" title="Center on my GPS position">◎</button>
+      <button class="mbtn" id="btnPark" title="Go back to Izvor Park">⌂</button>
+    </div>
+    <div id="legend">
+      <div><span class="dot good"></span> Good (dark-sky friendly)</div>
+      <div><span class="dot fair"></span> Fair (could improve)</div>
+      <div><span class="dot bad"></span> Bad (harmful)</div>
+      <div><span class="dot inc"></span> Incomplete</div>
+    </div>
+  </div>
+
+  <aside id="panel">
+    <h3>Audit results</h3>
+    <div class="statgrid">
+      <div class="stat"><div class="num" id="stTotal">0</div><div class="lbl">lamp-posts audited</div></div>
+      <div class="stat"><div class="num" id="stGood">0%</div><div class="lbl">good lights</div></div>
+      <div class="stat"><div class="num" id="stFair">0%</div><div class="lbl">fair lights</div></div>
+      <div class="stat"><div class="num" id="stBad">0%</div><div class="lbl">bad lights</div></div>
+    </div>
+
+    <h3>Shielding (how the fixture directs light)</h3>
+    <div class="dist" id="distShield"></div>
+    <h3>Light colour</h3>
+    <div class="dist" id="distColour"></div>
+    <h3>Controls (timer / motion sensor)</h3>
+    <div class="dist" id="distControls"></div>
+
+    <h3>Data</h3>
+    <div class="btns">
+      <button class="btn" id="btnGeo">Export GeoJSON</button>
+      <button class="btn" id="btnCsv">Export CSV</button>
+      <button class="btn" id="btnImport">Import / merge</button>
+      <button class="btn" id="btnSummary">Copy stats text</button>
+      <button class="btn wide" id="btnClear">Clear all data</button>
+    </div>
+    <div id="status"></div>
+    <input type="file" id="fileInput" accept=".geojson,.json" style="display:none" />
+
+    <h3>Map settings</h3>
+    <div class="q" style="margin-top:0">
+      <label>CARTO basemap key (optional)</label>
+      <input type="text" id="cartoKey" placeholder="Free key from carto.com/basemaps/apikey" />
+      <div class="help">CARTO's Street and Dark basemaps now require a free key. The default map layers work without any key at all.</div>
+    </div>
+    <button class="btn" id="btnCartoKey" style="width:100%">Save key</button>
+
+    <h3>Method</h3>
+    <details class="method">
+      <summary>Show the audit questions &amp; scoring</summary>
+      <ul>
+        <li><b>1. Purpose</b> - does the light serve a clear, necessary purpose?</li>
+        <li><b>2. Spill</b> - does light reach beyond where it is needed?</li>
+        <li><b>3. Controls</b> - is it on a timer or motion sensor? (dusk-to-dawn photocells are discouraged)</li>
+        <li><b>4. Brightness</b> - could it be dimmer and still do its job?</li>
+        <li><b>5. Colour</b> - warm light (3000 K or less) is far less attractive to moths than cool white / blue-rich light.</li>
+        <li><b>Shielding</b> - full cut-off (best) > cut-off > semi cut-off > no cut-off (worst).</li>
+      </ul>
+      <p>Each answer adds penalty points (0 to 4). Total 0-3 = Good, 4-7 = Fair, 8+ = Bad. An unnecessary light is always a candidate to remove. Warm-white or amber LEDs, shielded, on motion sensors are the moth-friendly ideal.</p>
+      <p>Sources: Butterfly Conservation "Your guide to moths and light pollution" and the IDA home lighting audit.</p>
+    </details>
+  </aside>
+</div>
+
+<dialog id="dlg">
+  <div class="dlg-body">
+    <div class="dlg-head">
+      <h2 id="dlgTitle">Light pole</h2>
+      <span id="ratingBadge">incomplete</span>
+    </div>
+    <div class="coords" id="dlgCoords"></div>
+
+    <div class="q">
+      <label>1. Does the light serve a clear and necessary purpose?</label>
+      <div class="seg" data-name="purpose">
+        <label><input type="radio" name="purpose" value="yes"> Yes</label>
+        <label><input type="radio" name="purpose" value="no"> No</label>
+        <label><input type="radio" name="purpose" value="unsure"> Unsure</label>
+      </div>
+      <div class="help">"No" means an unnecessary light: the fix is to remove it.</div>
+    </div>
+
+    <div class="q">
+      <label>2. Does the light reach beyond where it is needed?</label>
+      <div class="seg" data-name="spill">
+        <label><input type="radio" name="spill" value="no"> No, it's targeted</label>
+        <label><input type="radio" name="spill" value="yes"> Yes, it spills</label>
+        <label><input type="radio" name="spill" value="unsure"> Unsure</label>
+      </div>
+    </div>
+
+    <div class="q">
+      <label>3. Is the light connected to active controls?</label>
+      <div class="seg" data-name="controls">
+        <label><input type="radio" name="controls" value="yes"> Timer / motion sensor</label>
+        <label><input type="radio" name="controls" value="no"> Always on, no control</label>
+        <label><input type="radio" name="controls" value="photocell"> Dusk-to-dawn photocell</label>
+        <label><input type="radio" name="controls" value="unsure"> Unsure</label>
+      </div>
+    </div>
+
+    <div class="q">
+      <label>4. Could the light be dimmer and still perform its task?</label>
+      <div class="seg" data-name="brightness">
+        <label><input type="radio" name="brightness" value="right"> No, just right</label>
+        <label><input type="radio" name="brightness" value="too_bright"> Yes, too bright</label>
+        <label><input type="radio" name="brightness" value="unsure"> Unsure</label>
+      </div>
+    </div>
+
+    <div class="q">
+      <label>5. Is the light source warm in colour?</label>
+      <div class="pair">
+        <div>
+          <select id="f_colour">
+            <option value="">(choose)</option>
+            <option value="warm">Warm (3000 K or less)</option>
+            <option value="cool">Cool white (over 3000 K)</option>
+            <option value="unsure">Unsure</option>
+          </select>
+        </div>
+        <div><input type="number" id="f_kelvin" placeholder="K on the lamp, if visible" min="1000" max="20000" /></div>
+      </div>
+      <div class="help" style="margin-top:5px">
+        <select id="f_lamp" style="width:100%">
+          <option value="">Lamp type (optional)</option>
+          <option value="warm_led">Warm-white LED</option>
+          <option value="cool_led">Cool-white / blue LED</option>
+          <option value="metal_halide">Metal halide</option>
+          <option value="fluorescent">Fluorescent tube</option>
+          <option value="hps">High-pressure sodium (orange)</option>
+          <option value="incandescent">Incandescent</option>
+          <option value="halogen">Halogen</option>
+          <option value="unknown">Unknown</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="q">
+      <label>Shielding class (how much light is directed up)</label>
+      <select id="f_shielding">
+        <option value="">(choose)</option>
+        <option value="full">Full cut-off (best, all light down)</option>
+        <option value="cutoff">Cut-off (good)</option>
+        <option value="semi">Semi cut-off (bad, some upward spill)</option>
+        <option value="none">No cut-off (worst, all directions)</option>
+        <option value="unsure">Unsure</option>
+      </select>
+    </div>
+
+    <div class="q">
+      <label>Estimated mounting height</label>
+      <select id="f_height">
+        <option value="">(choose)</option>
+        <option value="low">Low (under 3 m)</option>
+        <option value="medium">Medium (3-6 m)</option>
+        <option value="tall">Tall (over 6 m)</option>
+        <option value="unsure">Unsure</option>
+      </select>
+    </div>
+
+    <div class="q">
+      <label>Was the lamp working during the survey?</label>
+      <div class="seg" data-name="working">
+        <label><input type="radio" name="working" value="yes"> Yes</label>
+        <label><input type="radio" name="working" value="no"> No</label>
+      </div>
+    </div>
+
+    <div class="q">
+      <label>Notes (optional)</label>
+      <textarea id="f_notes" placeholder="Anything notable: damaged shield, glare towards path, lamp label, nearby tree..."></textarea>
+    </div>
+
+    <div class="dlg-foot">
+      <button class="btn" id="btnCancel">Cancel</button>
+      <button class="btn primary" id="btnSave">Save pole</button>
+      <button class="btn" id="btnDelete" style="display:none">Delete</button>
+    </div>
+  </div>
+</dialog>
+
+<div id="toast"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  var PARK = { lat: 44.43181, lng: 26.08757, zoom: 17 };
+  var STORE_KEY = "stingem-lumina-poles-v1";
+  var HAS_LEAFLET = typeof L !== "undefined";
+
+  var poles = load();
+  var editingId = null;   // null = placing a new pole
+  var pendingLat = null, pendingLng = null;
+  var map = null, markerLayer = null;
+
+  // ---------- scoring ----------
+  var PEN = {
+    purpose:   { yes: 0, unsure: 1, no: 4 },
+    spill:     { no: 0, unsure: 1, yes: 2 },
+    controls:  { yes: 0, unsure: 1, no: 2, photocell: 2 },
+    brightness:{ right: 0, unsure: 1, too_bright: 1 },
+    colour:    { warm: 0, unsure: 1.5, cool: 3 },
+    shielding: { full: 0, cutoff: 1, unsure: 1.5, semi: 2, none: 3 }
+  };
+  var REQUIRED = ["purpose", "spill", "controls", "brightness", "colour", "shielding"];
+
+  function scoreOf(p) {
+    var s = 0, missing = 0;
+    REQUIRED.forEach(function (k) {
+      if (PEN[k][p[k]] !== undefined && p[k] !== "") s += PEN[k][p[k]];
+      else missing++;
+    });
+    if (p.shielding === "" || p.shielding === undefined) { /* already counted */ }
+    return { score: s, complete: missing === 0 };
+  }
+
+  function ratingOf(p) {
+    var r = scoreOf(p);
+    if (!r.complete) return "incomplete";
+    if (r.score <= 3) return "good";
+    if (r.score <= 7) return "fair";
+    return "bad";
+  }
+
+  var COLORS = { good: "#22c55e", fair: "#f59e0b", bad: "#ef4444", incomplete: "#94a3b8" };
+
+  // ---------- storage ----------
+  function load() {
+    try {
+      var raw = localStorage.getItem(STORE_KEY);
+      if (!raw) return [];
+      var arr = JSON.parse(raw);
+      return Array.isArray(arr) ? arr : [];
+    } catch (e) { return []; }
+  }
+  function save() {
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(poles)); }
+    catch (e) { setStatus("Could not save to local storage: " + e.message); }
+  }
+
+  // ---------- helpers ----------
+  function $(id) { return document.getElementById(id); }
+  function setStatus(t) { $("status").textContent = t || ""; }
+  var toastTimer = null;
+  function toast(msg) {
+    var el = $("toast");
+    el.textContent = msg;
+    el.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { el.classList.remove("show"); }, 2600);
+  }
+  function nextId() {
+    var max = 0;
+    poles.forEach(function (p) {
+      var m = /^P(\d+)$/.exec(p.id);
+      if (m) max = Math.max(max, parseInt(m[1], 10));
+    });
+    return "P" + ("000" + (max + 1)).slice(-3);
+  }
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+  function download(name, text, mime) {
+    var blob = new Blob([text], { type: mime });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url; a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+  }
+  function stamp() {
+    var d = new Date();
+    return d.toISOString().slice(0, 10);
+  }
+
+  // ---------- maps ----------
+  var cartoLayers = null;
+
+  function cartoUrl(style) {
+    var key = "";
+    try { key = (localStorage.getItem("stingem-lumina-carto-key") || "").trim(); } catch (e) {}
+    var u = "https://basemaps.cartocdn.com/rastertiles/" + style + "/{z}/{x}/{y}{r}.png";
+    return key ? u + "?key=" + encodeURIComponent(key) : u;
+  }
+
+  function initLeaflet() {
+    map = L.map("map", { zoomControl: true, attributionControl: true }).setView([PARK.lat, PARK.lng], PARK.zoom);
+
+    // Keyless layers are the default; they always work. CARTO's basemaps now need a
+    // free key (https://carto.com/basemaps/apikey) - paste it under "Map settings".
+    cartoLayers = {
+      voyager: L.tileLayer(cartoUrl("voyager"), {
+        maxZoom: 20,
+        attribution: "&copy; OpenStreetMap contributors &copy; CARTO"
+      }),
+      dark: L.tileLayer(cartoUrl("dark_all"), {
+        maxZoom: 20,
+        attribution: "&copy; OpenStreetMap contributors &copy; CARTO"
+      })
+    };
+    var baseLayers = {
+      "Street (OSM.de)": L.tileLayer("https://tile.openstreetmap.de/{z}/{x}/{y}.png", {
+        maxZoom: 18,
+        attribution: "&copy; OpenStreetMap contributors, tiles &copy; OpenStreetMap Germany"
+      }),
+      "Street (CARTO)": cartoLayers.voyager,
+      "Dark (CARTO)": cartoLayers.dark,
+      "OSM standard": L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
+        attribution: "&copy; OpenStreetMap contributors"
+      }),
+      "Street (Esri)": L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}", {
+        maxZoom: 19,
+        attribution: "Tiles &copy; Esri"
+      }),
+      "Satellite (Esri)": L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+        maxZoom: 19,
+        attribution: "Tiles &copy; Esri, Maxar, Earthstar Geographics"
+      })
+    };
+    baseLayers["Street (OSM.de)"].addTo(map);
+    L.control.layers(baseLayers, null, { position: "topleft", collapsed: true }).addTo(map);
+
+    // If a provider blocks or fails, tell the user instead of showing grey gaps silently.
+    var tileErrTimer = null;
+    map.on("tileerror", function () {
+      if (tileErrTimer) return;
+      tileErrTimer = setTimeout(function () { tileErrTimer = null; }, 8000);
+      toast("Some map tiles failed to load (blocked or offline). Try switching the base map with the icon in the top-left corner.");
+    });
+    markerLayer = L.layerGroup().addTo(map);
+    map.on("click", function (e) {
+      // ignore clicks that originated on markers (they have their own handler)
+      placeNew(e.latlng.lat, e.latlng.lng);
+    });
+    $("map").style.display = "block";
+    $("fallback").style.display = "none";
+  }
+
+  // Fallback mini-map (used when the Leaflet CDN is unavailable, e.g. in sandboxed previews)
+  var FB = { spanLat: 0.0065, spanLng: 0.0092, size: 1000, svg: null };
+  function initFallback() {
+    $("map").style.display = "none";
+    var fb = $("fallback");
+    fb.style.display = "block";
+    var s = '<svg viewBox="0 0 1000 1000" id="fbSvg">';
+    s += '<rect x="0" y="0" width="1000" height="1000" fill="#141a2e"/>';
+    for (var gx = 0; gx <= 10; gx++) {
+      s += '<line x1="' + (gx * 100) + '" y1="0" x2="' + (gx * 100) + '" y2="1000" stroke="#232c4d" stroke-width="1"/>';
+      s += '<line x1="0" y1="' + (gx * 100) + '" x2="1000" y2="' + (gx * 100) + '" stroke="#232c4d" stroke-width="1"/>';
+    }
+    s += '<circle cx="500" cy="500" r="14" fill="none" stroke="#f5b942" stroke-width="2" stroke-dasharray="4 3"/>';
+    s += '<text x="500" y="545" text-anchor="middle" fill="#9aa5c0" font-size="26" font-family="system-ui">Izvor Park (offline preview map)</text>';
+    s += '<text x="500" y="965" text-anchor="middle" fill="#5a6485" font-size="20" font-family="system-ui">tap to place a light pole</text>';
+    s += '<g id="fbPoles"></g></svg>';
+    fb.innerHTML = s;
+    var svg = $("fbSvg");
+    svg.addEventListener("click", function (ev) {
+      var pt = svgPoint(ev, svg);
+      var ll = fbToLatLng(pt.x, pt.y);
+      placeNew(ll.lat, ll.lng);
+    });
+    FB.svg = svg;
+    $("hint").textContent = "Offline preview map · the real street map loads once opened online";
+  }
+  function svgPoint(ev, svg) {
+    var pt = svg.createSVGPoint();
+    pt.x = ev.clientX; pt.y = ev.clientY;
+    return pt.matrixTransform(svg.getScreenCTM().inverse());
+  }
+  function latLngToFb(lat, lng) {
+    var x = 500 + ((lng - PARK.lng) / FB.spanLng) * 500;
+    var y = 500 - ((lat - PARK.lat) / FB.spanLat) * 500;
+    return { x: x, y: y };
+  }
+  function fbToLatLng(x, y) {
+    var lng = PARK.lng + ((x - 500) / 500) * FB.spanLng;
+    var lat = PARK.lat - ((y - 500) / 500) * FB.spanLat;
+    return { lat: lat, lng: lng };
+  }
+
+  // ---------- markers ----------
+  function renderMarkers() {
+    if (HAS_LEAFLET && map) {
+      markerLayer.clearLayers();
+      poles.forEach(function (p) {
+        var c = COLORS[ratingOf(p)];
+        var m = L.circleMarker([p.lat, p.lng], {
+          radius: 10, color: "#fff", weight: 2, fillColor: c, fillOpacity: 0.95
+        }).addTo(markerLayer);
+        m.bindTooltip(p.id + " · " + ratingOf(p));
+        m.on("click", function () { openForm(p.id); });
+      });
+    } else {
+      var g = document.getElementById("fbPoles");
+      if (!g) return;
+      var s = "";
+      poles.forEach(function (p) {
+        var xy = latLngToFb(p.lat, p.lng);
+        var c = COLORS[ratingOf(p)];
+        s += '<circle cx="' + xy.x.toFixed(1) + '" cy="' + xy.y.toFixed(1) + '" r="12" fill="' + c +
+             '" stroke="#fff" stroke-width="2" data-id="' + esc(p.id) + '" style="cursor:pointer"/>';
+        s += '<text x="' + (xy.x + 17).toFixed(1) + '" y="' + (xy.y + 5).toFixed(1) +
+             '" fill="#e8ecf5" font-size="17" font-family="system-ui" pointer-events="none">' + esc(p.id) + "</text>";
+      });
+      g.innerHTML = s;
+      Array.prototype.forEach.call(g.querySelectorAll("circle"), function (cEl) {
+        cEl.addEventListener("click", function (ev) {
+          ev.stopPropagation();
+          openForm(cEl.getAttribute("data-id"));
+        });
+      });
+    }
+  }
+
+  // ---------- form ----------
+  function placeNew(lat, lng) {
+    editingId = null;
+    pendingLat = lat; pendingLng = lng;
+    openForm(null);
+  }
+
+  function openForm(id) {
+    var p = null;
+    if (id) {
+      p = poles.filter(function (x) { return x.id === id; })[0];
+      if (!p) return;
+      editingId = id;
+      pendingLat = null; pendingLng = null;
+    }
+    var dlg = $("dlg");
+    // reset
+    ["purpose", "spill", "controls", "brightness", "working"].forEach(function (n) {
+      var radios = dlg.querySelectorAll('input[name="' + n + '"]');
+      Array.prototype.forEach.call(radios, function (r) { r.checked = false; });
+    });
+    ["f_colour", "f_lamp", "f_shielding", "f_height"].forEach(function (n) { $(n).value = ""; });
+    $("f_kelvin").value = "";
+    $("f_notes").value = "";
+
+    if (p) {
+      $("dlgTitle").textContent = "Light pole " + p.id;
+      $("dlgCoords").textContent = p.lat.toFixed(6) + ", " + p.lng.toFixed(6) + " · first audited " + (p.timestamp || "").slice(0, 10);
+      ["purpose", "spill", "controls", "brightness", "working"].forEach(function (n) {
+        if (p[n]) {
+          var r = dlg.querySelector('input[name="' + n + '"][value="' + p[n] + '"]');
+          if (r) r.checked = true;
+        }
+      });
+      $("f_colour").value = p.colour || "";
+      $("f_kelvin").value = p.kelvin || "";
+      $("f_lamp").value = p.lampType || "";
+      $("f_shielding").value = p.shielding || "";
+      $("f_height").value = p.height || "";
+      $("f_notes").value = p.notes || "";
+      $("btnDelete").style.display = "";
+    } else {
+      $("dlgTitle").textContent = "New light pole " + nextId();
+      $("dlgCoords").textContent = "GPS position: " + pendingLat.toFixed(6) + ", " + pendingLng.toFixed(6);
+      $("btnDelete").style.display = "none";
+    }
+    updateBadge();
+    if (typeof dlg.showModal === "function") dlg.showModal();
+    else dlg.setAttribute("open", "");
+  }
+
+  function currentFormPole() {
+    var dlg = $("dlg");
+    function radioVal(n) {
+      var r = dlg.querySelector('input[name="' + n + '"]:checked');
+      return r ? r.value : "";
+    }
+    var p = {
+      purpose: radioVal("purpose"),
+      spill: radioVal("spill"),
+      controls: radioVal("controls"),
+      brightness: radioVal("brightness"),
+      colour: $("f_colour").value,
+      kelvin: $("f_kelvin").value ? parseInt($("f_kelvin").value, 10) : null,
+      lampType: $("f_lamp").value,
+      shielding: $("f_shielding").value,
+      height: $("f_height").value,
+      working: radioVal("working") || "",
+      notes: $("f_notes").value.trim()
+    };
+    return p;
+  }
+
+  function updateBadge() {
+    var b = $("ratingBadge");
+    var p = currentFormPole();
+    var rating = ratingOf(p);
+    b.textContent = rating + (rating === "incomplete" ? "" : " · " + scoreOf(p).score + " pts");
+    b.style.background = COLORS[rating];
+    b.style.color = "#0b0f1c";
+  }
+
+  // live badge updates
+  ["change", "input"].forEach(function (evt) {
+    $("dlg").addEventListener(evt, function (e) {
+      if (e.target.name === "purpose" || e.target.name === "spill" || e.target.name === "controls" ||
+          e.target.name === "brightness" || e.target.name === "working" ||
+          ["f_colour", "f_kelvin", "f_lamp", "f_shielding", "f_height"].indexOf(e.target.id) >= 0) {
+        // lamp type auto-sets colour
+        if (e.target.id === "f_lamp") {
+          var map = { warm_led: "warm", incandescent: "warm", halogen: "warm", hps: "warm",
+                      cool_led: "cool", metal_halide: "cool", fluorescent: "cool" };
+          if (map[e.target.value]) $("f_colour").value = map[e.target.value];
+        }
+        if (e.target.id === "f_kelvin" && $("f_kelvin").value) {
+          var k = parseInt($("f_kelvin").value, 10);
+          if (k >= 1000) $("f_colour").value = k <= 3000 ? "warm" : "cool";
+        }
+        updateBadge();
+      }
+    });
+  });
+
+  $("btnCancel").addEventListener("click", function () { closeDlg(); });
+  $("btnSave").addEventListener("click", function () {
+    var data = currentFormPole();
+    if (editingId) {
+      var p = poles.filter(function (x) { return x.id === editingId; })[0];
+      if (p) {
+        for (var k in data) p[k] = data[k];
+        p.edited = new Date().toISOString();
+      }
+      toast("Pole " + editingId + " updated");
+    } else {
+      data.id = nextId();
+      data.lat = pendingLat;
+      data.lng = pendingLng;
+      data.timestamp = new Date().toISOString();
+      poles.push(data);
+      toast("Pole " + data.id + " added");
+    }
+    save();
+    renderMarkers();
+    updateStats();
+    closeDlg();
+  });
+  $("btnDelete").addEventListener("click", function () {
+    if (!editingId) return;
+    var i = poles.findIndex(function (x) { return x.id === editingId; });
+    if (i >= 0) {
+      toast("Pole " + poles[i].id + " deleted");
+      poles.splice(i, 1);
+      save(); renderMarkers(); updateStats();
+    }
+    closeDlg();
+  });
+  function closeDlg() {
+    var dlg = $("dlg");
+    if (dlg.close) dlg.close(); else dlg.removeAttribute("open");
+    editingId = null;
+  }
+
+  // ---------- stats ----------
+  function updateStats() {
+    var n = poles.length;
+    var counts = { good: 0, fair: 0, bad: 0, incomplete: 0 };
+    poles.forEach(function (p) { counts[ratingOf(p)]++; });
+    $("stTotal").textContent = n;
+    function pct(x) { return n ? Math.round(100 * x / n) + "%" : "0%"; }
+    $("stGood").textContent = pct(counts.good);
+    $("stFair").textContent = pct(counts.fair);
+    $("stBad").textContent = pct(counts.bad);
+
+    var chips = '<span class="chip"><span class="dot inc"></span>Poles ' + n + "</span>";
+    chips += '<span class="chip"><span class="dot good"></span>Good ' + pct(counts.good) + "</span>";
+    chips += '<span class="chip"><span class="dot fair"></span>Fair ' + pct(counts.fair) + "</span>";
+    chips += '<span class="chip"><span class="dot bad"></span>Bad ' + pct(counts.bad) + "</span>";
+    chips += '<span class="chip"><span class="dot inc"></span>Incomplete ' + counts.incomplete + "</span>";
+    $("chips").innerHTML = chips;
+
+    dist("distShield", ["full", "cutoff", "semi", "none", "unsure"],
+      { full: "Full cut-off", cutoff: "Cut-off", semi: "Semi cut-off", none: "No cut-off", unsure: "Unsure" },
+      { full: "#22c55e", cutoff: "#84cc16", semi: "#f59e0b", none: "#ef4444", unsure: "#94a3b8" });
+
+    dist("distColour", ["warm", "cool", "unsure"],
+      { warm: "Warm (<=3000K)", cool: "Cool white", unsure: "Unsure" },
+      { warm: "#22c55e", cool: "#3b82f6", unsure: "#94a3b8" });
+
+    dist("distControls", ["yes", "no", "photocell", "unsure"],
+      { yes: "Timer / motion", no: "Always on", photocell: "Dusk-to-dawn", unsure: "Unsure" },
+      { yes: "#22c55e", no: "#ef4444", photocell: "#f59e0b", unsure: "#94a3b8" });
+  }
+
+  function dist(elId, keys, names, colors) {
+    var n = poles.length;
+    var counts = {};
+    keys.forEach(function (k) { counts[k] = 0; });
+    poles.forEach(function (p) { if (counts[p[elId === "distShield" ? "shielding" : elId === "distColour" ? "colour" : "controls"]] !== undefined) counts[p[elId === "distShield" ? "shielding" : elId === "distColour" ? "colour" : "controls"]]++; });
+    var html = "";
+    keys.forEach(function (k) {
+      var w = n ? Math.round(100 * counts[k] / n) : 0;
+      html += '<div class="row"><span class="name">' + esc(names[k]) + '</span>' +
+              '<span class="bar"><i style="width:' + w + "%;background:" + colors[k] + '"></i></span>' +
+              '<span class="val">' + counts[k] + "</span></div>";
+    });
+    $(elId).innerHTML = html;
+  }
+
+  function summaryText() {
+    var n = poles.length;
+    var counts = { good: 0, fair: 0, bad: 0, incomplete: 0 };
+    var warm = 0, cool = 0, unshielded = 0;
+    poles.forEach(function (p) {
+      counts[ratingOf(p)]++;
+      if (p.colour === "warm") warm++;
+      if (p.colour === "cool") cool++;
+      if (p.shielding === "none" || p.shielding === "semi") unshielded++;
+    });
+    function pct(x) { return n ? Math.round(100 * x / n) + "%" : "0%"; }
+    return "Operation Stingem Lumina, Izvor Park, Bucharest. We audited " + n +
+      " lamp-posts using the IDA / Butterfly Conservation dark-sky methodology. " +
+      "Results: " + pct(counts.good) + " good, " + pct(counts.fair) + " fair, " + pct(counts.bad) +
+      " bad lights (" + counts.incomplete + " entries incomplete). " +
+      pct(warm) + " of lamps emit warm light (3000K or less); " + pct(unshielded) +
+      " have no or only partial cut-off shielding, sending light into the sky where it harms moths and other nocturnal wildlife.";
+  }
+
+  // ---------- export / import ----------
+  function commonProps(p) {
+    return {
+      id: p.id,
+      purpose: p.purpose,
+      spill: p.spill,
+      controls: p.controls,
+      brightness: p.brightness,
+      colour: p.colour,
+      kelvin: p.kelvin,
+      lampType: p.lampType,
+      shielding: p.shielding,
+      height: p.height,
+      working: p.working,
+      notes: p.notes,
+      auditedAt: p.timestamp || null,
+      editedAt: p.edited || null,
+      score: scoreOf(p).score,
+      rating: ratingOf(p)
+    };
+  }
+
+  $("btnGeo").addEventListener("click", function () {
+    var fc = {
+      type: "FeatureCollection",
+      name: "Izvor Park light audit",
+      generator: "Stingem Lumina Light Pole Audit Map",
+      exportedAt: new Date().toISOString(),
+      features: poles.map(function (p) {
+        return {
+          type: "Feature",
+          geometry: { type: "Point", coordinates: [Number(p.lng), Number(p.lat)] },
+          properties: commonProps(p)
+        };
+      })
+    };
+    download("izvor-park-lights-" + stamp() + ".geojson", JSON.stringify(fc, null, 2), "application/geo+json");
+    toast("Exported " + poles.length + " poles as GeoJSON");
+  });
+
+  $("btnCsv").addEventListener("click", function () {
+    var cols = ["id", "lat", "lng", "purpose", "spill", "controls", "brightness", "colour", "kelvin",
+                "lampType", "shielding", "height", "working", "score", "rating", "auditedAt", "notes"];
+    function q(v) {
+      v = String(v == null ? "" : v);
+      return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+    }
+    var lines = [cols.join(",")];
+    poles.forEach(function (p) {
+      var props = commonProps(p);
+      lines.push(cols.map(function (c) {
+        if (c === "lat") return p.lat;
+        if (c === "lng") return p.lng;
+        return q(props[c]);
+      }).join(","));
+    });
+    download("izvor-park-lights-" + stamp() + ".csv", lines.join("\n"), "text/csv");
+    toast("Exported " + poles.length + " poles as CSV");
+  });
+
+  $("btnSummary").addEventListener("click", function () {
+    var t = summaryText();
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(t).then(function () { toast("Summary copied to clipboard"); },
+        function () { toast("Copy failed; summary shown in the status line"); setStatus(t); });
+    } else {
+      setStatus(t);
+      toast("Summary shown in the status line");
+    }
+  });
+
+  $("btnImport").addEventListener("click", function () { $("fileInput").click(); });
+  $("fileInput").addEventListener("change", function () {
+    var f = this.files && this.files[0];
+    this.value = "";
+    if (!f) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      try {
+        var data = JSON.parse(reader.result);
+        var feats = data.features || (Array.isArray(data) ? data : null);
+        if (!feats) throw new Error("no features array found");
+        var added = 0, updated = 0;
+        feats.forEach(function (ft) {
+          var props = ft.properties || {};
+          var coords = ft.geometry && ft.geometry.coordinates;
+          if (!coords) return;
+          var p = {
+            id: props.id || nextId(),
+            lat: Number(coords[1]), lng: Number(coords[0]),
+            purpose: props.purpose || "", spill: props.spill || "",
+            controls: props.controls || "", brightness: props.brightness || "",
+            colour: props.colour || "", kelvin: props.kelvin || null,
+            lampType: props.lampType || "", shielding: props.shielding || "",
+            height: props.height || "", working: props.working || "",
+            notes: props.notes || "",
+            timestamp: props.auditedAt || new Date().toISOString(),
+            edited: props.editedAt || null
+          };
+          var idx = poles.findIndex(function (x) { return x.id === p.id; });
+          if (idx >= 0) { poles[idx] = p; updated++; }
+          else { poles.push(p); added++; }
+        });
+        save(); renderMarkers(); updateStats();
+        toast("Imported: " + added + " new, " + updated + " updated");
+      } catch (e) {
+        toast("Import failed: " + e.message);
+      }
+    };
+    reader.readAsText(f);
+  });
+
+  var clearArmed = false;
+  $("btnClear").addEventListener("click", function () {
+    if (!clearArmed) {
+      clearArmed = true;
+      this.textContent = "Really clear ALL poles? Tap again";
+      this.classList.add("danger-armed");
+      var b = this;
+      setTimeout(function () { clearArmed = false; b.textContent = "Clear all data"; b.classList.remove("danger-armed"); }, 3500);
+      return;
+    }
+    poles = [];
+    save(); renderMarkers(); updateStats();
+    clearArmed = false;
+    this.textContent = "Clear all data";
+    this.classList.remove("danger-armed");
+    toast("All data cleared");
+  });
+
+  // ---------- top map buttons ----------
+  $("btnGps").addEventListener("click", function () {
+    if (!navigator.geolocation) { toast("Geolocation not available on this device"); return; }
+    navigator.geolocation.getCurrentPosition(function (pos) {
+      var la = pos.coords.latitude, ln = pos.coords.longitude;
+      if (HAS_LEAFLET && map) map.setView([la, ln], 18);
+      else toast("You are at " + la.toFixed(5) + ", " + ln.toFixed(5));
+    }, function () {
+      toast("Could not get GPS position (permission denied or unavailable)");
+    }, { enableHighAccuracy: true, timeout: 10000 });
+  });
+  $("btnPark").addEventListener("click", function () {
+    if (HAS_LEAFLET && map) map.setView([PARK.lat, PARK.lng], PARK.zoom);
+    else toast("Preview map is fixed on Izvor Park");
+  });
+
+  $("btnCartoKey").addEventListener("click", function () {
+    var key = $("cartoKey").value.trim();
+    try { localStorage.setItem("stingem-lumina-carto-key", key); } catch (e) {}
+    if (cartoLayers && HAS_LEAFLET) {
+      cartoLayers.voyager.setUrl(cartoUrl("voyager"));
+      cartoLayers.dark.setUrl(cartoUrl("dark_all"));
+    }
+    toast(key
+      ? "CARTO key saved. Switch to a CARTO layer (top-left icon) to use it."
+      : "Key cleared. Default keyless layers keep working.");
+  });
+  try { $("cartoKey").value = localStorage.getItem("stingem-lumina-carto-key") || ""; } catch (e) {}
+
+  // ---------- go ----------
+  if (HAS_LEAFLET) initLeaflet();
+  else initFallback();
+  renderMarkers();
+  updateStats();
+})();
+</script>
+</body>
+</html>
